@@ -24,6 +24,7 @@ print(f"기본 인코딩: {sys.getdefaultencoding()}")
 # 모듈 임포트 수정 - JOB_TITLES 제거
 from data import EMPLOYEES, EMPLOYEE_SKILLS, SAMPLE_EVALUATIONS
 from ai_utils import analyze_evaluation
+from job_descriptions import find_similar_job, format_job_description, JOB_DESCRIPTIONS
 
 # 한글 폰트 해결을 위한 더 강력한 설정 시도
 def try_set_korean_font():
@@ -303,6 +304,65 @@ def name_changed(name):
     
     return f"{job_title}", skills_text, sample_eval
 
+def get_job_description(job_title):
+    """
+    직무명을 입력받아 해당 직무 또는 가장 유사한 직무에 대한 상세 설명을 반환합니다.
+    
+    Args:
+        job_title: 직무명
+        
+    Returns:
+        마크다운 형식의 직무 설명
+    """
+    print(f"직무 설명 조회 요청: {job_title}")
+    
+    # 직무명이 빈 문자열이거나 None인 경우 처리
+    if not job_title or job_title.strip() == "":
+        return "직무를 선택해주세요."
+    
+    # 직무명이 직무 설명 데이터베이스에 있는 경우 바로 조회
+    if job_title in JOB_DESCRIPTIONS:
+        print(f"직무 '{job_title}' 정보를 직접 찾았습니다.")
+        description = format_job_description(job_title)
+        # 정확한 일치인 경우 헤더에 정확한 매치임을 표시
+        return f"## 🎯 정확한 매치: 100% 일치\n\n{description}"
+    
+    # 유사한 직무 찾기 (RAG 검색 단계)
+    similar_job, similarity = find_similar_job(job_title)
+    print(f"직무 '{job_title}'와 가장 유사한 직무는 '{similar_job}'입니다. (유사도: {similarity:.1f}%)")
+    
+    # 유사 직무에 대한 설명 반환 (유사도 정보 포함)
+    description = format_job_description(similar_job)
+
+    emoji = "🔍"
+    similarity_text = f"**유사한 직무**: {similarity:.1f}% 일치"
+    
+    '''
+    # 유사도에 따른 이모지 선택
+    if similarity >= 80:
+        emoji = "🔍"
+        similarity_text = f"**매우 유사한 직무**: {similarity:.1f}% 일치"
+    elif similarity >= 60:
+        emoji = "🔎"
+        similarity_text = f"**관련 직무**: {similarity:.1f}% 일치"
+    elif similarity >= 40:
+        emoji = "📋"
+        similarity_text = f"**부분 관련 직무**: {similarity:.1f}% 일치"
+    else:
+        emoji = "❓"
+        similarity_text = f"**유사도 낮음**: {similarity:.1f}% 일치"
+    '''
+    
+    # RAG 정보 추가
+    rag_header = f"""## {emoji} RAG 검색 결과: {similarity_text}
+
+> **검색 쿼리**: '{job_title}'  
+> **찾은 직무**: '{similar_job}'
+
+"""
+    
+    return rag_header + description
+
 def process_evaluation(name, evaluation_text=None):
     """
     평가 내용을 처리하고 결과를 반환합니다.
@@ -445,6 +505,9 @@ with gr.Blocks(title="AI 기반 인사 평가 시스템") as demo:
             
             job_output = gr.Textbox(label="직무", interactive=False)
             
+            # 직무 설명 조회 버튼 추가
+            job_info_button = gr.Button("🔍 직무 설명 검색하기", variant="secondary")
+            
             skills_output = gr.Textbox(label="평가해야 할 스킬", lines=6, interactive=False)
         
         with gr.Column(scale=2):
@@ -453,6 +516,9 @@ with gr.Blocks(title="AI 기반 인사 평가 시스템") as demo:
                 placeholder="평가 내용을 입력하세요. 비워두면 샘플 데이터가 사용됩니다.",
                 lines=10
             )
+
+            # job_description_output을 평가 내용 아래에 위치시킵니다
+            job_description_output = gr.Markdown(visible=False, label="직무 설명")
     
     analyze_button = gr.Button("평가 분석하기", variant="primary")
     
@@ -488,6 +554,21 @@ with gr.Blocks(title="AI 기반 인사 평가 시스템") as demo:
         fn=name_changed,
         inputs=name_input,
         outputs=[job_output, skills_output, evaluation_input]
+    )
+    
+    # toggle_job_description 함수를 수정합니다
+    def toggle_job_description(job_title):
+        """
+        직무 설명을 표시하는 함수
+        """
+        description = get_job_description(job_title)
+        return gr.update(visible=True, value=description)
+
+    # job_info_button.click 이벤트 핸들러를 수정합니다
+    job_info_button.click(
+        fn=toggle_job_description,
+        inputs=job_output,
+        outputs=job_description_output
     )
     
     analyze_button.click(
